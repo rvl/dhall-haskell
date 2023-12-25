@@ -22,8 +22,9 @@ import Dhall.LSP.Handlers
     , cancelationHandler
     )
 import Dhall.LSP.State
-import Language.LSP.Server (Options(..), ServerDefinition(..), type (<~>)(..))
-import Language.LSP.Types
+import Language.LSP.Server (LspServerLog, Options(..), ServerDefinition(..), type (<~>)(..))
+import Language.LSP.Protocol.Types
+import Language.LSP.Protocol.Message
 import System.Exit (ExitCode(..))
 
 import qualified Control.Concurrent.MVar as MVar
@@ -53,16 +54,16 @@ run mlog = do
           return (Right environment)
 
   let options = def
-        { LSP.textDocumentSync = Just syncOptions
+        { LSP.optTextDocumentSync = Just syncOptions
 
-        , completionTriggerCharacters = Just [':', '.', '/']
+        , optCompletionTriggerCharacters = Just [':', '.', '/']
 
         -- Note that this registers the dhall.server.lint command
         -- with VSCode, which means that our plugin can't expose a
         -- command of the same name. In the case of dhall.lint we
         -- name the server-side command dhall.server.lint to work
         -- around this peculiarity.
-        , executeCommandCommands =
+        , optExecuteCommandCommands =
             Just
               [ "dhall.server.lint",
                 "dhall.server.annotateLet",
@@ -71,7 +72,7 @@ run mlog = do
               ]
         }
 
-  let staticHandlers =
+  let staticHandlers _clientCapabilities =
         mconcat
           [ hoverHandler
           , didOpenTextDocumentNotificationHandler
@@ -95,20 +96,20 @@ run mlog = do
                 (e, newState) <- State.runStateT (Except.runExceptT handler) oldState
                 result <- case e of
                   Left (Log, _message) -> do
-                    let _xtype = MtLog
+                    let _type_ = MessageType_Log
 
-                    LSP.sendNotification SWindowLogMessage LogMessageParams{..}
+                    LSP.sendNotification SMethod_WindowLogMessage LogMessageParams{..}
 
                     liftIO (fail (Text.unpack _message))
 
                   Left (severity_, _message) -> do
-                    let _xtype = case severity_ of
-                          Error   -> MtError
-                          Warning -> MtWarning
-                          Info    -> MtInfo
-                          Log     -> MtLog
+                    let _type_ = case severity_ of
+                          Error   -> MessageType_Error
+                          Warning -> MessageType_Warning
+                          Info    -> MessageType_Info
+                          Log     -> MessageType_Log
 
-                    LSP.sendNotification SWindowShowMessage ShowMessageParams{..}
+                    LSP.sendNotification SMethod_WindowShowMessage ShowMessageParams{..}
                     liftIO (fail (Text.unpack _message))
                   Right a -> do
                       return a
@@ -138,7 +139,7 @@ setupLogger file              = LSP.setupLogger file [] System.Log.Logger.DEBUG
 syncOptions :: TextDocumentSyncOptions
 syncOptions = TextDocumentSyncOptions
   { _openClose         = Just True
-  , _change            = Just TdSyncIncremental
+  , _change            = Just TextDocumentSyncKind_Incremental
   , _willSave          = Just False
   , _willSaveWaitUntil = Just False
   , _save              = Just (InR (SaveOptions (Just False)))
